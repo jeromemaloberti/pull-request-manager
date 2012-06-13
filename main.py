@@ -1,6 +1,6 @@
 import re, os, time, traceback
 from watchdog import Watchdog
-from github2.client import Github
+from github import Github
 from jiralib import jira
 
 # switch, which determines whether any real actions are executed
@@ -42,21 +42,20 @@ ls = [l.strip() for l in open("positive.txt").readlines() if l.strip()]
 positive = '|'.join(["(%s)" % l for l in ls])
 
 # create an authenticating GitHub client
-github = Github(username=bot_name,
-                api_token=settings.bot_api_token,
-                requests_per_second=1)
+github = Github(bot_name,settings.bot_password)
+org = github.get_organization(org_name)
 
 def refresh_privileges():
     """Figure out who can approve a request (admin_usernames), and whose pull
     requests are considered (pr_usernames)."""
     log("Refreshing privileges..")
     global admin_usernames, pr_usernames
-    teams = github.organizations.teams(org_name)
-    admin_team_ids = [t.id for t in teams if t.permission in ["admin", "push"]]
-    admins = sum([github.teams.members(id) for id in admin_team_ids], [])
+    teams = org.get_teams()
+    admin_teams = [t for t in teams if t.permission in ["admin", "push"]]
+    admins = sum([list(team.get_members()) for team in admin_teams], [])
     admin_usernames = [admin.login for admin in admins]
-    pr_team_ids = [t.id for t in teams if t.name == "Authorised pull request authors"]
-    pr_users = sum([github.teams.members(id) for id in pr_team_ids], [])
+    pr_team_ids = [t for t in teams if t.name == "Authorised pull request authors"]
+    pr_users = sum([list(team.get_members()) for team in pr_team_ids], [])
     pr_usernames = [pr_user.login for pr_user in pr_users]
     pr_usernames.extend(admin_usernames)
 
@@ -69,25 +68,29 @@ def get_next_pull_request():
     # for each repository
     for rep_name in rep_names:
         # get repository path
-        rep_path = "%s/%s" % (org_name, rep_name)
+        repo = org.get_repo(rep_name)
         # fetch all open pull requests for this repository
-        all_prs = github.pull_requests.list(rep_path, "open")
+        all_prs = repo.get_pulls("open")
         # select only pull requests by trusted users
         valid_prs = [pr for pr in all_prs
-                     if pr.user["login"] in pr_usernames
-                     and pr.base["ref"] in branch_whitelist]
+                     if pr.user.login in pr_usernames
+                     and pr.base.ref in branch_whitelist]
         # Select pull requests which are not made by trusted users,
         # but which 1) have comments 2) made by admin users 3) which
         # contain the text '@xen-git check' in the comment body.
         for pr in set(all_prs) - set(valid_prs):
-            comments = github.issues.comments(rep_path, pr.number)
+            # Strange bug in github api, comments are in issues.
+            issue = repo.get_issue(pr.number)
+            comments = issue.get_comments()
             if search_comments(comments, "check"):
                 valid_prs.append(pr)
         # if a pull request contains a specific comment, chose it immediately
         # otherwise, choose a pull request with no comments from bot or whose
         # refs have changed
         for valid_pr in valid_prs:
-            comments = github.issues.comments(rep_path, valid_pr.number)
+            # Strange bug in github api, comments are in issues.
+            issue = repo.get_issue(valid_pr.number)
+            comments = issue.get_comments()
             succeeded, changed = should_rebuild(valid_pr, comments)
             # check if an admin approved it, and its last attempt to build it
             # was successful or refs have changed
@@ -136,10 +139,9 @@ def dependencies_satisfied(pr, rep_name):
         if dep_pr_rep not in rep_names:
             report_error(pr, "Dependency on unknown depository: %s" % dep_pr_rep, False)
             return False
-        dep_pr_rep_path = "%s/%s" % (org_name, dep_pr_rep)
         dep_pr = None
         try:
-            dep_pr = github.pull_requests.show(dep_pr_rep_path, dep_pr_no)
+            dep_pr = org.get_repo(dep_pr_rep).get_pull(dep_pr_no)
         except:
             report_error(pr, "Could not find dependency: %s" % d, False)
             return False
@@ -151,11 +153,12 @@ def dependencies_satisfied(pr, rep_name):
 def should_rebuild(pr, comments):
     """Checks the pull requests and its comments to see whether the pull request
     has succeeded the last time, and whether the refs have changed."""
-    rep_name = pr.base["repository"]["name"]
+    rep_name = pr.base.repo.name
     if not dependencies_satisfied(pr, rep_name):
         return False, False
     # approve if no existing bot comments
-    bot_comments = [c for c in comments if c.user == bot_name]
+    # for c in comments : print "comment by %s:%s" % (c.user.login,c.body)
+    bot_comments = [c for c in comments if c.user.login == bot_name]
     if not bot_comments:
         log("NO COMMENTS: %s/%d" % (rep_name, pr.number))
         return False, True # "last build not succeeded", "refs changed"
@@ -167,7 +170,7 @@ def should_rebuild(pr, comments):
     last_pr_ref = refs[0]
     last_branch_ref = refs[1]
     current_pr_ref = get_pr_ref(pr)
-    branch = pr.base["ref"]
+    branch = pr.base.ref
     current_branch_ref = get_branch_ref(rep_name, branch)
     changed = last_pr_ref != current_pr_ref or last_branch_ref != current_branch_ref
     if changed: log("REFS CHANGED: %s/%d" % (rep_name, pr.number))
@@ -176,10 +179,9 @@ def should_rebuild(pr, comments):
 def report_error(pr, ex_msg, show_log):
     """Report an error regarding the given pull request with the given
     message. The message is reported on standard output and GitHub."""
-    rep_name = pr.base["repository"]["name"]
-    rep_path = "%s/%s" % (org_name, rep_name)
+    rep_name = pr.base.repo.name
     pr_ref = get_pr_ref(pr)
-    branch = pr.base["ref"]
+    branch = pr.base.ref
     branch_ref = get_branch_ref(rep_name, branch)
     prefix = bot_msg_prefix(pr_ref, branch_ref)
     msg = "%s Merge and build failed.\n%s" % (prefix, ex_msg)
@@ -193,7 +195,7 @@ def report_error(pr, ex_msg, show_log):
         for i in range(firstLineToPrint, firstLineToPrint + linesToPrint):
             msg += "\n    %s" % lines[i].rstrip()
     print_msg(pr, msg)
-    if active: github.issues.comment(rep_path, pr.number, msg)
+    if active: pr.base.repo.get_issue(pr.number).create_comment(msg)
 
 def bot_msg_prefix(pr_ref, branch_ref):
     return "### %s &#8658; %s:" % (pr_ref, branch_ref)
@@ -261,8 +263,8 @@ def verify_whitespace_changes(rep_dir, pr):
     log("Verifying whitespace changes..")
     checked = False
     execute_and_report(rep_dir, "git checkout master")
-    prev = pr.base["sha"]
-    log_range = "%s..%s" % (pr.base["sha"], pr.head["sha"])
+    prev = pr.base.sha
+    log_range = "%s..%s" % (pr.base.sha, pr.head.sha)
     log_cmd = "git log --reverse --pretty=oneline %s" % log_range
     out = execute_and_return(rep_dir, log_cmd)
     for line in out.split("\n"):
@@ -293,14 +295,14 @@ def process_pull_request(pr, rebuild_required, merge, ticket):
     if not rebuild_required and not merge:
         log("Invalid call: rebuild_required=False, merge=False")
         return
-    rep_name = pr.base["repository"]["name"]
+    rep_name = pr.base.repo.name
     rep_path = "%s/%s" % (org_name, rep_name)
-    user = pr.user["login"] # user doing the pull request
-    owner = pr.head["repository"]["owner"] # owner of the pull request's repository
+    user = pr.user.login # user doing the pull request
+    owner = pr.head.repo.owner.login # owner of the pull request's repository
     log("Processing pull request %s/%d .." % (rep_path, pr.number))
     component_name = rep_names[rep_name]
     rep_dir = "%s/myrepos/%s" % (build_path, rep_name)
-    branch = pr.base["ref"]
+    branch = pr.base.ref
     branch_sha = get_branch_sha(rep_name, branch)
     internal_branch = branch_whitelist[branch]
     build_rep = "%s/%s/build.hg" % (build_rep_prefix, internal_branch)
@@ -317,7 +319,7 @@ def process_pull_request(pr, rebuild_required, merge, ticket):
         (rep_dir, "git checkout master"),
         (rep_dir, "git remote add %s git://github.com/%s/%s.git" % (user, owner, rep_name)),
         (rep_dir, "git fetch %s" % user),
-        (rep_dir, "git merge %s" % pr.head["sha"]),
+        (rep_dir, "git merge %s" % pr.head.sha),
         ]
     for path, cmd in path_cmds: execute_and_report(path, cmd)
     pr_ref = get_pr_ref(pr)
@@ -338,7 +340,7 @@ def process_pull_request(pr, rebuild_required, merge, ticket):
         fresh_pr = github.pull_requests.show(rep_path, pr.number)
         if fresh_pr.state != "open":
             raise MergeError("Pull request %s no longer 'open'." % rep_path)
-        if fresh_pr.head["sha"] != pr.head["sha"]:
+        if fresh_pr.head.sha != pr.head.sha:
             fresh_pr_ref = get_pr_ref(fresh_pr)
             raise MergeError("Pull request %s modified since to %s." % (rep_path, fresh_pr_ref))
         rep_url = "git@github-xen-git:%s.git" % rep_path
@@ -361,24 +363,26 @@ def process_pull_request(pr, rebuild_required, merge, ticket):
         '''
         print_msg(pr, msg)
         if active:
-            github.issues.comment(rep_path, pr.number, msg)
-            github.issues.close(rep_path, pr.number)
+            pr.base.repo.get_issue(pr.number).create_comment(msg)
+            pr.base.repo.get_issue(pr.number).edit(state="closed")
         log("Allowing for local/GitHub repos re-sync. Sleeping for %ds." % resync_sleep)
         time.sleep(resync_sleep)
     else:
         msg += " Can merge pull request."
         print_msg(pr, msg)
-        if active: github.issues.comment(rep_path, pr.number, msg)
+        if active: pr.base.repo.get_issue(pr.number).create_comment(msg)
 
 def get_branch_sha(rep_name, branch):
     """Obtain SHA of the last commit of the specified branch of the specified
     repository. The results are cached."""
     global branch_sha_cache
+    org = github.get_organization(org_name)
+    repo = org.get_repo(rep_name)
     rep_path = "%s/%s" % (org_name, rep_name)
     try:
         branch_sha = branch_sha_cache[(rep_path, branch)]
     except KeyError:
-        branch_sha = github.repos.branches(rep_path)[branch]
+        branch_sha = [br.commit.sha for br in repo.get_branches() if br.name == branch][0]
         branch_sha_cache[(rep_path, branch)] = branch_sha
     return branch_sha
 
@@ -387,9 +391,9 @@ def get_branch_ref(rep_name, branch, branch_sha=None):
     return "%s/%s@%s" % (org_name, rep_name, branch_sha)
 
 def get_pr_ref(pr, ref=None):
-    if ref == None: ref = pr.head["sha"]
-    return "%s/%s@%s" % (pr.head["repository"]["owner"],
-                         pr.head["repository"]["name"], ref)
+    if ref == None: ref = pr.head.sha
+    return "%s/%s@%s" % (pr.head.repo.owner.login,
+                         pr.head.repo.name, ref)
 
 def clear_state():
     """Clears any global state due to the processing of pull requests."""
