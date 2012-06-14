@@ -42,7 +42,7 @@ ls = [l.strip() for l in open("positive.txt").readlines() if l.strip()]
 positive = '|'.join(["(%s)" % l for l in ls])
 
 # create an authenticating GitHub client
-github = Github(bot_name,settings.bot_password)
+github = Github(bot_name, settings.bot_password)
 org = github.get_organization(org_name)
 
 def refresh_privileges():
@@ -157,7 +157,6 @@ def should_rebuild(pr, comments):
     if not dependencies_satisfied(pr, rep_name):
         return False, False
     # approve if no existing bot comments
-    # for c in comments : print "comment by %s:%s" % (c.user.login,c.body)
     bot_comments = [c for c in comments if c.user.login == bot_name]
     if not bot_comments:
         log("NO COMMENTS: %s/%d" % (rep_name, pr.number))
@@ -303,7 +302,7 @@ def process_pull_request(pr, rebuild_required, merge, ticket):
     component_name = rep_names[rep_name]
     rep_dir = "%s/myrepos/%s" % (build_path, rep_name)
     branch = pr.base.ref
-    branch_sha = get_branch_sha(rep_name, branch)
+    branch_sha = get_cached_branch_sha(rep_name, branch)
     internal_branch = branch_whitelist[branch]
     build_rep = "%s/%s/build.hg" % (build_rep_prefix, internal_branch)
     path_cmds = [
@@ -333,7 +332,7 @@ def process_pull_request(pr, rebuild_required, merge, ticket):
             execute_and_report(build_path, "make api-build")
     msg += " Build succeeded."
     if merge:
-        fresh_branch_sha = get_real_branch_sha(rep_name, branch)
+        fresh_branch_sha = get_fresh_branch_sha(rep_name, branch)
         if fresh_branch_sha != branch_sha:
             fresh_branch_ref = get_branch_ref(rep_name, branch, fresh_branch_sha)
             raise MergeError("Branch %s updated since to %s." % (branch, fresh_branch_ref))
@@ -372,14 +371,14 @@ def process_pull_request(pr, rebuild_required, merge, ticket):
         print_msg(pr, msg)
         if active: pr.base.repo.get_issue(pr.number).create_comment(msg)
 
-def get_real_branch_sha(rep_name, branch):
+def get_fresh_branch_sha(rep_name, branch):
     """Obtain SHA of the last commit of the specified branch of the specified
     repository."""
     repo = org.get_repo(rep_name)
     branch_sha = [br.commit.sha for br in repo.get_branches() if br.name == branch][0]
     return branch_sha
 
-def get_branch_sha(rep_name, branch):
+def get_cached_branch_sha(rep_name, branch):
     """Obtain SHA of the last commit of the specified branch of the specified
     repository. The results are cached."""
     global branch_sha_cache
@@ -387,12 +386,12 @@ def get_branch_sha(rep_name, branch):
     try:
         branch_sha = branch_sha_cache[(rep_path, branch)]
     except KeyError:
-        branch_sha = get_real_branch_sha(rep_name, branch)
+        branch_sha = get_fresh_branch_sha(rep_name, branch)
         branch_sha_cache[(rep_path, branch)] = branch_sha
     return branch_sha
 
 def get_branch_ref(rep_name, branch, branch_sha=None):
-    if not branch_sha: branch_sha = get_branch_sha(rep_name, branch)
+    if not branch_sha: branch_sha = get_cached_branch_sha(rep_name, branch)
     return "%s/%s@%s" % (org_name, rep_name, branch_sha)
 
 def get_pr_ref(pr, ref=None):
