@@ -112,7 +112,7 @@ def search_comments(comments, search_re):
     and one of its parts (parts are delimited by '.' or '!') starts with the
     given regular expression (case ignored)."""
     for c in comments:
-        if c.user not in admin_usernames: continue
+        if c.user.login not in admin_usernames: continue
         m = re.match("@%s " % bot_name, c.body, re.I)
         if not m: continue
         cmds = c.body[m.end():].replace('!', '.').split('.')
@@ -333,11 +333,11 @@ def process_pull_request(pr, rebuild_required, merge, ticket):
             execute_and_report(build_path, "make api-build")
     msg += " Build succeeded."
     if merge:
-        fresh_branch_sha = github.repos.branches(rep_path)[branch]
+        fresh_branch_sha = get_real_branch_sha(rep_name, branch)
         if fresh_branch_sha != branch_sha:
             fresh_branch_ref = get_branch_ref(rep_name, branch, fresh_branch_sha)
             raise MergeError("Branch %s updated since to %s." % (branch, fresh_branch_ref))
-        fresh_pr = github.pull_requests.show(rep_path, pr.number)
+        fresh_pr = org.get_repo(rep_name).get_pull(pr.number)
         if fresh_pr.state != "open":
             raise MergeError("Pull request %s no longer 'open'." % rep_path)
         if fresh_pr.head.sha != pr.head.sha:
@@ -372,17 +372,22 @@ def process_pull_request(pr, rebuild_required, merge, ticket):
         print_msg(pr, msg)
         if active: pr.base.repo.get_issue(pr.number).create_comment(msg)
 
+def get_real_branch_sha(rep_name, branch):
+    """Obtain SHA of the last commit of the specified branch of the specified
+    repository."""
+    repo = org.get_repo(rep_name)
+    branch_sha = [br.commit.sha for br in repo.get_branches() if br.name == branch][0]
+    return branch_sha
+
 def get_branch_sha(rep_name, branch):
     """Obtain SHA of the last commit of the specified branch of the specified
     repository. The results are cached."""
     global branch_sha_cache
-    org = github.get_organization(org_name)
-    repo = org.get_repo(rep_name)
     rep_path = "%s/%s" % (org_name, rep_name)
     try:
         branch_sha = branch_sha_cache[(rep_path, branch)]
     except KeyError:
-        branch_sha = [br.commit.sha for br in repo.get_branches() if br.name == branch][0]
+        branch_sha = get_real_branch_sha(rep_name, branch)
         branch_sha_cache[(rep_path, branch)] = branch_sha
     return branch_sha
 
