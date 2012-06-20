@@ -141,7 +141,7 @@ def dependencies_satisfied(pr, rep_name):
             return False
         dep_pr = None
         try:
-            dep_pr = org.get_repo(dep_pr_rep).get_pull(dep_pr_no)
+            dep_pr = org.get_repo(dep_pr_rep).get_pull(int(dep_pr_no))
         except:
             report_error(pr, "Could not find dependency: %s" % d, False)
             return False
