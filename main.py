@@ -26,6 +26,7 @@ branch_whitelist = { # valid GitHub branch -> local branch
     'master' : 'trunk-ring3',
     'boston-lcm' : 'boston-lcm',
     'rrdd' : 'rrdd',
+    'tampa' : 'tampa',
     'sanibel-lcm' : 'sanibel-lcm',
     }
 short_sleep = 60 # seconds
@@ -92,16 +93,17 @@ def get_next_pull_request():
             issue = repo.get_issue(valid_pr.number)
             comments = issue.get_comments()
             succeeded, changed = should_rebuild(valid_pr, comments)
+            send_notification = not succeeded
             # check if an admin approved it, and its last attempt to build it
             # was successful or refs have changed
             if (succeeded or changed) and search_comments(comments, positive):
                 log("APPROVED: %s/%d" % (rep_name, valid_pr.number))
                 ticket = search_title_for_key(valid_pr)
                 log("TICKET: %s" % ticket)
-                return valid_pr, True, True, ticket # rebuild, merge, to close
+                return valid_pr, True, True, ticket, send_notification # rebuild, merge, to close
             # otherwise, check if it should be processed anyway
             if changed: backup_pr = valid_pr
-    return backup_pr, True, False, None # rebuild, don't merge, don't close
+    return backup_pr, True, False, None, send_notification # rebuild, don't merge, don't close
 
 def search_title_for_key(pr):
     m = re.match("\[?(ca-[0-9]+)", pr.title, re.I)
@@ -150,6 +152,13 @@ def dependencies_satisfied(pr, rep_name):
             return False
     return True
 
+def succeeded_comment(comments):
+    for c in comments:
+        first_line = c.body.split("\n")[0]
+        if (first_line.find("Build succeeded.") != -1):
+            return True
+    return False
+
 def should_rebuild(pr, comments):
     """Checks the pull requests and its comments to see whether the pull request
     has succeeded the last time, and whether the refs have changed."""
@@ -162,9 +171,9 @@ def should_rebuild(pr, comments):
         log("NO COMMENTS: %s/%d" % (rep_name, pr.number))
         return False, True # "last build not succeeded", "refs changed"
     # otherwise, parse last bot's comment, and check for ref changes
+    succeeded = succeeded_comment(bot_comments)
     last_bot_comment = bot_comments[-1]
     first_line = last_bot_comment.body.split("\n")[0]
-    succeeded = first_line.find("Build succeeded.") != -1
     refs = re.findall("\S+?@\w+", first_line, re.U)
     last_pr_ref = refs[0]
     last_branch_ref = refs[1]
@@ -286,7 +295,15 @@ def verify_whitespace_changes(rep_dir, pr):
         prev = curr
     return checked
 
-def process_pull_request(pr, rebuild_required, merge, ticket):
+def create_jira_issue(pr):
+    log("Creating a merge request ticket for Ben Chalmers")
+    msg = "You can merge the following pull request: %s" % pr.html_url
+    jira_auth = jira.Jira(settings.jira_url, settings.jira_username, settings.jira_password)
+    ticket = jira_auth.createIssue(project='CA', summary='Merge request for Tampa', type='9',
+                                 priority='3', description=msg, assignee=settings.jira_assignee)
+    return ticket.getKey()
+
+def process_pull_request(pr, rebuild_required, merge, ticket, send_notification):
     """If a rebuild is required, try building the system with the changesets
     from the given pull request. If the build succeeds and the merge has been
     requested, merge the pull request with the main repository. Also close the
@@ -368,6 +385,9 @@ def process_pull_request(pr, rebuild_required, merge, ticket):
         time.sleep(resync_sleep)
     else:
         msg += " Can merge pull request."
+        if (branch == "tampa" and send_notification):
+            ca_ticket = create_jira_issue(pr)
+            msg += " Jira ticket %s" % ca_ticket
         print_msg(pr, msg)
         if active: pr.base.repo.get_issue(pr.number).create_comment(msg)
 
@@ -426,10 +446,10 @@ if __name__ == "__main__":
                 if run % 10 == 0:
                     run = 0
                     refresh_privileges()
-                pr, rebuild, merge, ticket = get_next_pull_request()
+                pr, rebuild, merge, ticket, send_notification = get_next_pull_request()
             if pr:
                 with Watchdog(build_timeout):
-                    process_pull_request(pr, rebuild, merge, ticket)
+                    process_pull_request(pr, rebuild, merge, ticket, send_notification)
             else:
                 log("No appropriate pull requests found.")
             log("Sleeping for %ds." % short_sleep)
