@@ -203,7 +203,9 @@ def report_error(pr, ex_msg, show_log):
         for i in range(firstLineToPrint, firstLineToPrint + linesToPrint):
             msg += "\n    %s" % lines[i].rstrip()
     print_msg(pr, msg)
-    if active: pr.base.repo.get_issue(pr.number).create_comment(msg)
+    if active:
+        issue = pr.base.repo.get_issue(pr.number)
+        issue.create_comment(msg.replace('%','_')) # PyGithub doesn't like % character.
 
 def bot_msg_prefix(pr_ref, branch_ref):
     return "### %s &#8658; %s:" % (pr_ref, branch_ref)
@@ -379,7 +381,7 @@ def process_pull_request(pr, rebuild_required, merge, ticket, send_notification)
         '''
         print_msg(pr, msg)
         if active:
-            pr.base.repo.get_issue(pr.number).create_comment(msg)
+            pr.base.repo.get_issue(pr.number).create_comment(msg.replace('%','_'))
             pr.base.repo.get_issue(pr.number).edit(state="closed")
         log("Allowing for local/GitHub repos re-sync. Sleeping for %ds." % resync_sleep)
         time.sleep(resync_sleep)
@@ -389,7 +391,7 @@ def process_pull_request(pr, rebuild_required, merge, ticket, send_notification)
             ca_ticket = create_jira_issue(pr)
             msg += " Jira ticket %s" % ca_ticket
         print_msg(pr, msg)
-        if active: pr.base.repo.get_issue(pr.number).create_comment(msg)
+        if active: pr.base.repo.get_issue(pr.number).create_comment(msg.replace('%','_'))
 
 def get_fresh_branch_sha(rep_name, branch):
     """Obtain SHA of the last commit of the specified branch of the specified
