@@ -83,7 +83,7 @@ def get_next_pull_request():
             # Strange bug in github api, comments are in issues.
             issue = repo.get_issue(pr.number)
             comments = issue.get_comments()
-            if search_comments(comments, "check"):
+            if search_comments(comments, "check",admin_usernames):
                 valid_prs.append(pr)
         # if a pull request contains a specific comment, chose it immediately
         # otherwise, choose a pull request with no comments from bot or whose
