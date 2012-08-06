@@ -94,9 +94,11 @@ def get_next_pull_request():
             comments = issue.get_comments()
             succeeded, changed = should_rebuild(valid_pr, comments)
             send_notification = not succeeded
+            validators = admin_usernames
+            if valid_pr.base.ref = "tampa": validators = ['bench']
             # check if an admin approved it, and its last attempt to build it
             # was successful or refs have changed
-            if (succeeded or changed) and search_comments(comments, positive):
+            if (succeeded or changed) and search_comments(comments, positive,validators):
                 log("APPROVED: %s/%d" % (rep_name, valid_pr.number))
                 ticket = search_title_for_key(valid_pr)
                 log("TICKET: %s" % ticket)
@@ -109,12 +111,12 @@ def search_title_for_key(pr):
     m = re.match("\[?(ca-[0-9]+)", pr.title, re.I)
     if m: return m.group(1)
 
-def search_comments(comments, search_re):
+def search_comments(comments, search_re,validators):
     """Checks whether any comment of a pull request starts with "@xen-git",
     and one of its parts (parts are delimited by '.' or '!') starts with the
     given regular expression (case ignored)."""
     for c in comments:
-        if c.user.login not in admin_usernames: continue
+        if c.user.login not in validators: continue
         m = re.match("@%s " % bot_name, c.body, re.I)
         if not m: continue
         cmds = c.body[m.end():].replace('!', '.').split('.')
@@ -301,8 +303,8 @@ def create_jira_issue(pr):
     log("Creating a merge request ticket for Ben Chalmers")
     msg = "You can merge the following pull request: %s" % pr.html_url
     jira_auth = jira.Jira(settings.jira_url, settings.jira_username, settings.jira_password)
-    ticket = jira_auth.createIssue(project='CA', summary='Merge request for Tampa', type='9',
-                                 priority='3', description=msg, assignee=settings.jira_assignee)
+    ticket = jira_auth.createIssue(project='CA', summary='Merge request for Tampa', type='Merge Request',
+                                 priority='Major', description=msg, assignee=settings.jira_assignee)
     return ticket.getKey()
 
 def process_pull_request(pr, rebuild_required, merge, ticket, send_notification):
@@ -330,7 +332,8 @@ def process_pull_request(pr, rebuild_required, merge, ticket, send_notification)
         (build_path, "make manifest-latest"),
         ]
     for path, cmd in path_cmds: execute_and_report(path, cmd)
-    for c in rep_names.itervalues(): execute_and_report(build_path, "make %s-myclone" % c)
+#    for c in rep_names.itervalues(): execute_and_report(build_path, "make %s-myclone" % c)
+    execute_and_report(build_path, "make %s-myclone" % component_name)
     path_cmds = [
         (rep_dir, "git config user.name %s" % bot_name),
         (rep_dir, "git config user.email %s" % settings.bot_email),
