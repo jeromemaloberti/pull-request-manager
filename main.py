@@ -107,10 +107,6 @@ def get_next_pull_request():
             if changed: backup_pr = valid_pr
     return backup_pr, True, False, None, send_notification # rebuild, don't merge, don't close
 
-def search_title_for_key(pr):
-    m = re.match("\[?(ca-[0-9]+)", pr.title, re.I)
-    if m: return m.group(1)
-
 def search_comments(comments, search_re,validators):
     """Checks whether any comment of a pull request starts with "@xen-git",
     and one of its parts (parts are delimited by '.' or '!') starts with the
@@ -299,12 +295,26 @@ def verify_whitespace_changes(rep_dir, pr):
         prev = curr
     return checked
 
+def search_title_for_key(pr):
+    m = re.match("\[?(ca-[0-9]+)", pr.title, re.I)
+    if m: return m.group(1)
+
+def closeTicket(pr, key):
+    j = jira.Jira(settings.jira_url, settings.jira_username, settings.jira_password)
+    i = j.getIssue(key)
+    if active:
+        link = "[A patch|%s]" % pr.html_url
+        i.addComment("%s that fixes this issue has been merged into trunk." % link)
+        i.resolve("Fixed")
+
 def create_jira_issue(pr):
     log("Creating a merge request ticket for Ben Chalmers")
     msg = "You can merge the following pull request: %s" % pr.html_url
     jira_auth = jira.Jira(settings.jira_url, settings.jira_username, settings.jira_password)
     ticket = jira_auth.createIssue(project='CA', summary='Merge request for Tampa', type='Merge Request',
                                  priority='Major', description=msg, assignee=settings.jira_assignee)
+    origin = search_title_for_key(pr)
+    if origin: ticket.linkIssue(origin,"contains")
     return ticket.getKey()
 
 def process_pull_request(pr, rebuild_required, merge, ticket, send_notification):
@@ -334,13 +344,14 @@ def process_pull_request(pr, rebuild_required, merge, ticket, send_notification)
     for path, cmd in path_cmds: execute_and_report(path, cmd)
 #    for c in rep_names.itervalues(): execute_and_report(build_path, "make %s-myclone" % c)
     execute_and_report(build_path, "make %s-myclone" % component_name)
+    merge_msg = "Merge pull request #%d from %s/%s\n" (pr.number,owner,pr.head.ref)
     path_cmds = [
         (rep_dir, "git config user.name %s" % bot_name),
         (rep_dir, "git config user.email %s" % settings.bot_email),
         (rep_dir, "git checkout master"),
         (rep_dir, "git remote add %s git://github.com/%s/%s.git" % (user, owner, rep_name)),
         (rep_dir, "git fetch %s" % user),
-        (rep_dir, "git merge %s" % pr.head.sha),
+        (rep_dir, "git merge -m \"%s\" %s" % (merge_msg,pr.head.sha)),
         ]
     for path, cmd in path_cmds: execute_and_report(path, cmd)
     pr_ref = get_pr_ref(pr)
@@ -371,7 +382,7 @@ def process_pull_request(pr, rebuild_required, merge, ticket, send_notification)
             ]
         if active:
             for path, cmd in path_cmds: execute_and_report(path, cmd)
-        msg += " Pull request merged."
+        msg += " Pull request merged." 
         '''
         if settings.jira_url and ticket:
             ticket_ref = "[{0}](http://jira/browse/{0})".format(ticket)
@@ -392,7 +403,7 @@ def process_pull_request(pr, rebuild_required, merge, ticket, send_notification)
         msg += " Can merge pull request."
         if (branch == "tampa" and send_notification):
             ca_ticket = create_jira_issue(pr)
-            msg += " Jira ticket %s" % ca_ticket
+            msg += "\nJira ticket %s" % ca_ticket
         print_msg(pr, msg)
         if active: pr.base.repo.get_issue(pr.number).create_comment(msg.replace('%','_'))
 
@@ -431,14 +442,6 @@ def clear_state():
 
 def log(msg):
     print "[%s] %s" % (time.ctime(), msg)
-
-def closeTicket(pr, key):
-    j = jira.Jira(settings.jira_url, settings.jira_username, settings.jira_password)
-    i = j.getIssue(key)
-    if active:
-        link = "[A patch|%s]" % pr.html_url
-        i.addComment("%s that fixes this issue has been merged into trunk." % link)
-        i.resolve("Fixed")
 
 if __name__ == "__main__":
     """Continually obtain pull requests, and process them. If there are no pull
