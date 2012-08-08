@@ -344,7 +344,7 @@ def process_pull_request(pr, rebuild_required, merge, ticket, send_notification)
     for path, cmd in path_cmds: execute_and_report(path, cmd)
 #    for c in rep_names.itervalues(): execute_and_report(build_path, "make %s-myclone" % c)
     execute_and_report(build_path, "make %s-myclone" % component_name)
-    merge_msg = "Merge pull request #%d from %s/%s\n" (pr.number,owner,pr.head.ref)
+    merge_msg = "Merge pull request #%d from %s/%s\n" % (pr.number,owner,pr.head.ref)
     path_cmds = [
         (rep_dir, "git config user.name %s" % bot_name),
         (rep_dir, "git config user.email %s" % settings.bot_email),
