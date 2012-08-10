@@ -92,8 +92,8 @@ def get_next_pull_request():
             # Strange bug in github api, comments are in issues.
             issue = repo.get_issue(valid_pr.number)
             comments = issue.get_comments()
-            succeeded, changed = should_rebuild(valid_pr, comments)
-            send_notification = not succeeded
+            succeeded, new_pr, changed = should_rebuild(valid_pr, comments)
+            send_notification = new_pr
             validators = admin_usernames
             if valid_pr.base.ref == "tampa": validators = ['benchalmers']
             # check if an admin approved it, and its last attempt to build it
@@ -162,12 +162,12 @@ def should_rebuild(pr, comments):
     has succeeded the last time, and whether the refs have changed."""
     rep_name = pr.base.repo.name
     if not dependencies_satisfied(pr, rep_name):
-        return False, False
+        return False, False, False
     # approve if no existing bot comments
     bot_comments = [c for c in comments if c.user.login == bot_name]
     if not bot_comments:
         log("NO COMMENTS: %s/%d" % (rep_name, pr.number))
-        return False, True # "last build not succeeded", "refs changed"
+        return False, True, False # "last build not succeeded", "refs changed"
     # otherwise, parse last bot's comment, and check for ref changes
     succeeded = succeeded_comment(bot_comments)
     last_bot_comment = bot_comments[-1]
@@ -180,7 +180,7 @@ def should_rebuild(pr, comments):
     current_branch_ref = get_branch_ref(rep_name, branch)
     changed = last_pr_ref != current_pr_ref or last_branch_ref != current_branch_ref
     if changed: log("REFS CHANGED: %s/%d" % (rep_name, pr.number))
-    return succeeded, changed
+    return succeeded, False, changed
 
 def report_error(pr, ex_msg, show_log):
     """Report an error regarding the given pull request with the given
