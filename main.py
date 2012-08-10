@@ -95,7 +95,7 @@ def get_next_pull_request():
             succeeded, changed = should_rebuild(valid_pr, comments)
             send_notification = not succeeded
             validators = admin_usernames
-            if valid_pr.base.ref == "tampa": validators = ['bench']
+            if valid_pr.base.ref == "tampa": validators = ['benchalmers']
             # check if an admin approved it, and its last attempt to build it
             # was successful or refs have changed
             if (succeeded or changed) and search_comments(comments, positive,validators):
