@@ -167,7 +167,7 @@ def should_rebuild(pr, comments):
     bot_comments = [c for c in comments if c.user.login == bot_name]
     if not bot_comments:
         log("NO COMMENTS: %s/%d" % (rep_name, pr.number))
-        return False, True, False # "last build not succeeded", "refs changed"
+        return False, True, True # "last build not succeeded", "refs changed"
     # otherwise, parse last bot's comment, and check for ref changes
     succeeded = succeeded_comment(bot_comments)
     last_bot_comment = bot_comments[-1]
