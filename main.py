@@ -260,7 +260,9 @@ class VerificationError(Exception):
 
 def obtain_normalised_shas(rep_dir, src_files, ref):
     shas = dict()
-    execute_and_report(rep_dir, "git checkout -B %s %s" % (tmp_branch, ref))
+#    execute_and_report(rep_dir, "git checkout -B %s %s" % (tmp_branch, ref))
+    execute_and_report(rep_dir, "git branch -f %s %s" % (tmp_branch, ref))
+    execute_and_report(rep_dir, "git checkout %s" % tmp_branch)
     for src_file in src_files:
         camlp4_cmd = "camlp4 -parser o -printer o -no_comments %s | md5sum" % src_file
         shas[src_file] = execute_and_return(rep_dir, camlp4_cmd).split()[0]
