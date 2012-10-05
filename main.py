@@ -28,6 +28,7 @@ branch_whitelist = { # valid GitHub branch -> local branch
     'rrdd' : 'rrdd',
     'tampa' : 'tampa',
     'sanibel-lcm' : 'sanibel-lcm',
+    'tampa-lcm' : 'tampa-lcm'
     }
 short_sleep = 60 # seconds
 long_sleep = 600 # seconds
@@ -309,12 +310,12 @@ def closeTicket(pr, key):
         i.addComment("%s that fixes this issue has been merged into trunk." % link)
         i.resolve("Fixed")
 
-def create_jira_issue(pr):
-    log("Creating a merge request ticket for Ben Chalmers")
+def create_jira_issue(pr,assignee):
+    log("Creating a merge request ticket for " % assignee)
     msg = "You can merge the following pull request: %s" % pr.html_url
     jira_auth = jira.Jira(settings.jira_url, settings.jira_username, settings.jira_password)
     ticket = jira_auth.createIssue(project='CA', summary='Merge request for Tampa', type='Merge Request',
-                                 priority='Major', description=msg, assignee=settings.jira_assignee)
+                                   priority='Major', description=msg, assignee=assignee)
     origin = search_title_for_key(pr)
     if origin: ticket.linkIssue(origin,"contains")
     return ticket.getKey()
@@ -403,9 +404,15 @@ def process_pull_request(pr, rebuild_required, merge, ticket, send_notification)
         time.sleep(resync_sleep)
     else:
         msg += " Can merge pull request."
-        if (branch == "tampa" and send_notification):
-            ca_ticket = create_jira_issue(pr)
-            msg += "\nJira ticket %s" % ca_ticket
+        if (send_notification):
+            assignee = ""
+            if (branch == "tampa"):
+                assignee = settings.jira_assignee
+            if (branch == "boston-lcm" or branch == "tampa-lcm" or branch = "sanibel-lcm"):
+                assignee = settings.jira_lcm_assignee
+            if (assignee != ""):
+                ca_ticket = create_jira_issue(pr, settings.jira_assignee)
+                msg += "\nJira ticket %s" % ca_ticket
         print_msg(pr, msg)
         if active: pr.base.repo.get_issue(pr.number).create_comment(msg.replace('%','_'))
 
